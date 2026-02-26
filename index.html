@@ -27,38 +27,33 @@ const fileInput = document.getElementById('fileElem');
 const progressBar = document.getElementById('progress-bar');
 const statusText = document.getElementById('status');
 
-// Click to open file selector
 dropArea.addEventListener('click', () => fileInput.click());
 
-// Highlight on drag
 dropArea.addEventListener('dragover', (e) => {
     e.preventDefault();
     dropArea.classList.add('highlight');
 });
 
-// Remove highlight
 dropArea.addEventListener('dragleave', () => {
     dropArea.classList.remove('highlight');
 });
 
-// Handle drop (MULTIPLE FILES)
 dropArea.addEventListener('drop', (e) => {
     e.preventDefault();
     dropArea.classList.remove('highlight');
     uploadFiles(e.dataTransfer.files);
 });
 
-// Handle file selection (MULTIPLE FILES)
 fileInput.addEventListener('change', () => {
     uploadFiles(fileInput.files);
 });
 
 function uploadFiles(files) {
 
-    if (!files.length) return;
-
-    progressBar.style.width = "0%";
-    statusText.innerText = "Uploading...";
+    if (!files.length) {
+        statusText.innerText = "No files selected.";
+        return;
+    }
 
     const xhr = new XMLHttpRequest();
     const formData = new FormData();
@@ -70,7 +65,6 @@ function uploadFiles(files) {
     xhr.open("POST", "/upload", true);
     xhr.responseType = "blob";
 
-    // Upload progress
     xhr.upload.onprogress = function(e) {
         if (e.lengthComputable) {
             const percent = (e.loaded / e.total) * 100;
@@ -85,16 +79,10 @@ function uploadFiles(files) {
             link.href = window.URL.createObjectURL(blob);
             link.download = "converted_files.zip";
             link.click();
-
-            progressBar.style.width = "100%";
-            statusText.innerText = "✅ ZIP Download ready!";
+            statusText.innerText = "✅ ZIP ready!";
         } else {
-            statusText.innerText = "❌ Error processing files.";
+            statusText.innerText = "❌ Upload failed.";
         }
-    };
-
-    xhr.onerror = function() {
-        statusText.innerText = "❌ Upload failed.";
     };
 
     xhr.send(formData);
@@ -103,4 +91,5 @@ function uploadFiles(files) {
      
 
 </body>
+
 </html>
