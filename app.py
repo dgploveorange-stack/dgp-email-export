@@ -9,43 +9,48 @@ from weasyprint import HTML
 
 app = Flask(__name__)
 
-# Base folder for temp files
+# Base folder for temporary workspace
 BASE_FOLDER = "workspace"
 os.makedirs(BASE_FOLDER, exist_ok=True)
 
 
 def process_msg_file(msg_path, work_dir):
     """
-    Convert a single .msg file to PDF, including the second email only, merge PDF attachments,
-    and return the final PDF path and all temp files for cleanup.
+    Process a single MSG file:
+    - Extract second email
+    - Convert to PDF
+    - Merge PDF attachments
+    Returns the final PDF path and list of temp files for cleanup.
     """
     temp_files = []
 
     msg = extract_msg.Message(msg_path)
     body = msg.body or ""
-
     if isinstance(body, bytes):
         body = body.decode("utf-8", errors="replace")
 
-    # Find all 'From:' headers
+    # Robust From: detection, ignore leading whitespace
     from_pattern = re.compile(r'^\s*From:\s.*', re.IGNORECASE | re.MULTILINE)
     matches = list(from_pattern.finditer(body))
+    print(f"DEBUG: Found {len(matches)} From: headers in {msg_path}")
 
-    if len(matches) < 1:
-        raise Exception("Second email not found in this MSG file.")
+    if len(matches) < 2:
+        raise Exception("Thread does not contain a second email.")
 
-    # Extract second email
-    second_text = body[matches[0].start():matches[1].start()].strip()
+    # Extract second email using matched From: positions
+    second_start = matches[0].start()
+    second_end = matches[1].start()
+    second_email = body[second_start:second_end].strip()
 
-    # Optional: remove Subject line from search
-    lines = second_text.splitlines()
-    second_text_body_only = "\n".join([l for l in lines if not l.lower().startswith("subject:")])
+    # Optional: remove subject line from search
+    lines = second_email.splitlines()
+    second_email_body = "\n".join([l for l in lines if not l.lower().startswith("subject:")])
 
-    # Convert second email text to HTML
+    # Convert to HTML for PDF
     html_content = f"""
     <html>
     <body style="font-family:Arial; font-size:12px;">
-    <pre style="white-space:pre-wrap;">{second_text}</pre>
+    <pre style="white-space:pre-wrap;">{second_email}</pre>
     </body>
     </html>
     """
@@ -68,8 +73,8 @@ def process_msg_file(msg_path, work_dir):
             merger.append(attach_path)
             temp_files.append(attach_path)
 
-    # Extract document number from second email only
-    match = re.search(r'DO\d{2}-\d{5}', second_text_body_only)
+    # Extract document number only from the second email
+    match = re.search(r'DO\d{2}-\d{5}', second_email_body)
     if match:
         output_name = f"{match.group(0)}.pdf"
     else:
@@ -121,7 +126,7 @@ def upload():
         if not created_files:
             return jsonify({"error": "No valid MSG files processed"}), 400
 
-        # Create ZIP
+        # Create ZIP of all PDFs
         zip_path = os.path.join(work_dir, "converted_files.zip")
         with zipfile.ZipFile(zip_path, 'w') as zipf:
             for pdf in created_files:
@@ -130,7 +135,7 @@ def upload():
         # Send ZIP to client
         response = send_file(zip_path, as_attachment=True)
 
-        # Cleanup temp files after download
+        # Cleanup temp files after sending
         @response.call_on_close
         def cleanup():
             for f in all_temp_files:
@@ -148,6 +153,5 @@ def upload():
 
 
 if __name__ == "__main__":
-    # For local testing
+    # Run locally for testing
     app.run(host="0.0.0.0", port=10000, debug=True)
-
