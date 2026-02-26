@@ -31,12 +31,11 @@ def process_msg_file(msg_path, work_dir):
 
     # Use the MSG subject too
     subject = msg.subject or ""
+    print(subject)
 
     # Robust From: detection
     from_pattern = re.compile(r'^\s*From:\s.*', re.IGNORECASE | re.MULTILINE)
     matches = list(from_pattern.finditer(body))
-    if len(matches) < 1:
-        raise Exception("Thread does not contain a second email.")
 
     # Extract second email
     second_start = matches[0].start()
@@ -155,5 +154,6 @@ def upload():
 if __name__ == "__main__":
     # Run locally for testing
     app.run(host="0.0.0.0", port=10000, debug=True)
+
 
 
