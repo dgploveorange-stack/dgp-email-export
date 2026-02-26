@@ -69,17 +69,18 @@ def process_msg_file(msg_path, work_dir):
 
     # Determine output PDF name from subject OR body
     # First try body
+    # Look for DOxx-xxxxx anywhere, even if inside parentheses
     match_body = re.search(r'DO\d{2}-\d{5}', second_email)
-    match_subject = re.search(r'DO\d{2}-\d{5}', subject)
-
+    match_subject = re.search(r'\(?DO\d{2}-\d{5}\)?', subject)  # allow parentheses
+    
+    # Strip parentheses if present
     if match_body:
         output_name = f"{match_body.group(0)}.pdf"
     elif match_subject:
-        output_name = f"{match_subject.group(0)}.pdf"
+        output_name = f"{match_subject.group(0).strip('()')}.pdf"
     else:
-        # fallback
         output_name = f"output_{uuid.uuid4().hex[:6]}.pdf"
-
+        
     final_path = os.path.join(work_dir, output_name)
     merger.write(final_path)
     merger.close()
@@ -154,6 +155,7 @@ def upload():
 if __name__ == "__main__":
     # Run locally for testing
     app.run(host="0.0.0.0", port=10000, debug=True)
+
 
 
 
