@@ -2,107 +2,7 @@
 <html>
 <head>
     <title>MSG to PDF Converter</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #f4f6f9;
-            text-align: center;
-            margin: 0;
-            padding: 0;
-        }
-
-        .container {
-            margin: 80px auto;
-            width: 360px;
-        }
-
-        /* Drop area */
-        #drop-area {
-            border: 2px dashed #007bff;
-            border-radius: 10px;
-            padding: 40px;
-            background: #fff;
-            cursor: pointer;
-            transition: background 0.3s, border-color 0.3s;
-        }
-
-        #drop-area.highlight {
-            background-color: #e9f5ff;
-            border-color: #0056b3;
-        }
-
-        #drop-area p {
-            margin: 0;
-            font-weight: bold;
-            color: #007bff;
-        }
-
-        /* Progress bar */
-        #progress-container {
-            width: 100%;
-            height: 10px;
-            background: #ddd;
-            border-radius: 5px;
-            margin: 20px 0;
-        }
-
-        #progress-bar {
-            height: 100%;
-            width: 0%;
-            background: #007bff;
-            border-radius: 5px;
-            transition: width 0.3s ease;
-        }
-
-        /* Status text */
-        #status {
-            font-weight: bold;
-            margin-top: 10px;
-            color: #333;
-        }
-
-        /* File list */
-        #file-list {
-            list-style: none;
-            padding: 0;
-            margin-top: 15px;
-            text-align: left;
-            max-height: 150px;
-            overflow-y: auto;
-        }
-
-        #file-list li {
-            background: #e9f5ff;
-            margin-bottom: 6px;
-            padding: 6px 10px;
-            border-radius: 5px;
-            font-size: 14px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        #file-list li span.filename {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        #file-list li button {
-            background: #ff4d4d;
-            border: none;
-            border-radius: 5px;
-            padding: 2px 6px;
-            color: white;
-            font-weight: bold;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        #file-list li button:hover {
-            background: #d93636;
-        }
-    </style>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
@@ -141,7 +41,6 @@ dropArea.addEventListener('dragover', (e) => {
     dropArea.classList.add('highlight');
 });
 
-// Remove highlight
 dropArea.addEventListener('dragleave', () => {
     dropArea.classList.remove('highlight');
 });
@@ -158,17 +57,13 @@ fileInput.addEventListener('change', () => {
     addFiles(fileInput.files);
 });
 
-// Add files to list
 function addFiles(files) {
     for (let i = 0; i < files.length; i++) {
-        if (!currentFiles.includes(files[i])) {
-            currentFiles.push(files[i]);
-        }
+        currentFiles.push(files[i]);
     }
     renderFileList();
 }
 
-// Render file list with remove buttons
 function renderFileList() {
     fileList.innerHTML = "";
     currentFiles.forEach((file, index) => {
@@ -190,7 +85,9 @@ function renderFileList() {
     });
 }
 
-// Upload files to backend
+// Upload on double-click
+dropArea.addEventListener('dblclick', uploadFiles);
+
 function uploadFiles() {
     if (currentFiles.length === 0) {
         statusText.innerText = "No files selected.";
@@ -239,11 +136,6 @@ function uploadFiles() {
 
     xhr.send(formData);
 }
-
-// Double click drop area to upload
-dropArea.addEventListener('dblclick', () => {
-    uploadFiles();
-});
 </script>
 
 </body>
