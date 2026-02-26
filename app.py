@@ -20,7 +20,7 @@ def process_msg_file(msg_path, work_dir):
     - Extract second email
     - Convert to PDF
     - Merge PDF attachments
-    Returns the final PDF path and list of temp files for cleanup.
+    - Determine output name from subject OR body
     """
     temp_files = []
 
@@ -29,24 +29,21 @@ def process_msg_file(msg_path, work_dir):
     if isinstance(body, bytes):
         body = body.decode("utf-8", errors="replace")
 
-    # Robust From: detection, ignore leading whitespace
+    # Use the MSG subject too
+    subject = msg.subject or ""
+
+    # Robust From: detection
     from_pattern = re.compile(r'^\s*From:\s.*', re.IGNORECASE | re.MULTILINE)
     matches = list(from_pattern.finditer(body))
-    print(f"DEBUG: Found {len(matches)} From: headers in {msg_path}")
-
     if len(matches) < 2:
         raise Exception("Thread does not contain a second email.")
 
-    # Extract second email using matched From: positions
+    # Extract second email
     second_start = matches[0].start()
     second_end = matches[1].start()
     second_email = body[second_start:second_end].strip()
 
-    # Optional: remove subject line from search
-    lines = second_email.splitlines()
-    second_email_body = "\n".join([l for l in lines if not l.lower().startswith("subject:")])
-
-    # Convert to HTML for PDF
+    # HTML for PDF
     html_content = f"""
     <html>
     <body style="font-family:Arial; font-size:12px;">
@@ -55,7 +52,6 @@ def process_msg_file(msg_path, work_dir):
     </html>
     """
 
-    # Save email PDF
     email_pdf = os.path.join(work_dir, f"{uuid.uuid4()}_email.pdf")
     HTML(string=html_content).write_pdf(email_pdf)
     temp_files.append(email_pdf)
@@ -63,7 +59,6 @@ def process_msg_file(msg_path, work_dir):
     # Merge PDF attachments
     merger = PdfMerger()
     merger.append(email_pdf)
-
     for attachment in msg.attachments:
         name = attachment.longFilename or attachment.shortFilename
         if name and name.lower().endswith(".pdf"):
@@ -73,11 +68,17 @@ def process_msg_file(msg_path, work_dir):
             merger.append(attach_path)
             temp_files.append(attach_path)
 
-    # Extract document number only from the second email
-    match = re.search(r'DO\d{2}-\d{5}', second_email_body)
-    if match:
-        output_name = f"{match.group(0)}.pdf"
+    # Determine output PDF name from subject OR body
+    # First try body
+    match_body = re.search(r'DO\d{2}-\d{5}', second_email)
+    match_subject = re.search(r'DO\d{2}-\d{5}', subject)
+
+    if match_body:
+        output_name = f"{match_body.group(0)}.pdf"
+    elif match_subject:
+        output_name = f"{match_subject.group(0)}.pdf"
     else:
+        # fallback
         output_name = f"output_{uuid.uuid4().hex[:6]}.pdf"
 
     final_path = os.path.join(work_dir, output_name)
@@ -87,7 +88,6 @@ def process_msg_file(msg_path, work_dir):
 
     temp_files.append(final_path)
     return final_path, temp_files
-
 
 @app.route("/")
 def index():
@@ -155,3 +155,4 @@ def upload():
 if __name__ == "__main__":
     # Run locally for testing
     app.run(host="0.0.0.0", port=10000, debug=True)
+
