@@ -21,6 +21,9 @@
     <p id="status"></p>
 
     <ul id="file-list"></ul>
+
+    <!-- Upload Button -->
+    <button id="uploadBtn">Upload Files</button>
 </div>
 
 <script>
@@ -29,6 +32,7 @@ const fileInput = document.getElementById('fileElem');
 const progressBar = document.getElementById('progress-bar');
 const statusText = document.getElementById('status');
 const fileList = document.getElementById('file-list');
+const uploadBtn = document.getElementById('uploadBtn');
 
 let currentFiles = [];
 
@@ -57,6 +61,7 @@ fileInput.addEventListener('change', () => {
     addFiles(fileInput.files);
 });
 
+// Add files to list
 function addFiles(files) {
     for (let i = 0; i < files.length; i++) {
         currentFiles.push(files[i]);
@@ -64,6 +69,7 @@ function addFiles(files) {
     renderFileList();
 }
 
+// Render file list with remove buttons
 function renderFileList() {
     fileList.innerHTML = "";
     currentFiles.forEach((file, index) => {
@@ -85,8 +91,8 @@ function renderFileList() {
     });
 }
 
-// Upload on double-click
-dropArea.addEventListener('dblclick', uploadFiles);
+// Upload files when clicking button
+uploadBtn.addEventListener('click', uploadFiles);
 
 function uploadFiles() {
     if (currentFiles.length === 0) {
