@@ -1,13 +1,89 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
     <title>MSG to PDF Converter</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f6f9;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            width: 400px;
+            text-align: center;
+        }
+
+        h2 {
+            margin-bottom: 20px;
+        }
+
+        input[type="file"] {
+            margin: 20px 0;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .note {
+            font-size: 12px;
+            color: #666;
+            margin-top: 15px;
+        }
+
+        .loading {
+            display: none;
+            margin-top: 15px;
+            color: #007bff;
+        }
+    </style>
+
+    <script>
+        function showLoading() {
+            document.getElementById("loading").style.display = "block";
+        }
+    </script>
 </head>
 <body>
-    <h2>Upload MSG File</h2>
-    <form action="/upload" method="post" enctype="multipart/form-data">
-        <input type="file" name="file" accept=".msg" required>
-        <button type="submit">Convert</button>
-    </form>
+
+    <div class="container">
+        <h2>MSG to PDF Converter</h2>
+
+        <form method="POST" enctype="multipart/form-data" onsubmit="showLoading()">
+            <input type="file" name="msgfile" accept=".msg" required>
+            <br>
+            <button type="submit">Convert to PDF</button>
+        </form>
+
+        <div id="loading" class="loading">
+            Processing... please wait.
+        </div>
+
+        <div class="note">
+            Upload a .msg file to extract the second email and merge PDF attachments.
+        </div>
+    </div>
+
 </body>
 </html>
