@@ -1,89 +1,142 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
     <title>MSG to PDF Converter</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #f4f6f9;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-        }
-
-        .container {
-            background: white;
-            padding: 40px;
-            border-radius: 10px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            width: 400px;
-            text-align: center;
-        }
-
-        h2 {
-            margin-bottom: 20px;
-        }
-
-        input[type="file"] {
-            margin: 20px 0;
-        }
-
-        button {
-            background-color: #007bff;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        button:hover {
-            background-color: #0056b3;
-        }
-
-        .note {
-            font-size: 12px;
-            color: #666;
-            margin-top: 15px;
-        }
-
-        .loading {
-            display: none;
-            margin-top: 15px;
-            color: #007bff;
-        }
-    </style>
-
-    <script>
-        function showLoading() {
-            document.getElementById("loading").style.display = "block";
-        }
-    </script>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
-    <div class="container">
-        <h2>MSG to PDF Converter</h2>
+<div class="container">
+    <h2>Drag & Drop MSG Files</h2>
 
-        <form method="POST" enctype="multipart/form-data" onsubmit="showLoading()">
-            <input type="file" name="msgfile" accept=".msg" required>
-            <br>
-            <button type="submit">Convert to PDF</button>
-        </form>
-
-        <div id="loading" class="loading">
-            Processing... please wait.
-        </div>
-
-        <div class="note">
-            Upload a .msg file to extract the second email and merge PDF attachments.
-        </div>
+    <div id="drop-area">
+        <p>Drop .msg files here or click to select</p>
+        <input type="file" id="fileElem" accept=".msg" multiple style="display:none;">
     </div>
+
+    <div id="progress-container">
+        <div id="progress-bar"></div>
+    </div>
+
+    <p id="status"></p>
+
+    <ul id="file-list"></ul>
+</div>
+
+<script>
+const dropArea = document.getElementById('drop-area');
+const fileInput = document.getElementById('fileElem');
+const progressBar = document.getElementById('progress-bar');
+const statusText = document.getElementById('status');
+const fileList = document.getElementById('file-list');
+
+let currentFiles = [];
+
+// Click to open file selector
+dropArea.addEventListener('click', () => fileInput.click());
+
+// Highlight on drag
+dropArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropArea.classList.add('highlight');
+});
+
+dropArea.addEventListener('dragleave', () => {
+    dropArea.classList.remove('highlight');
+});
+
+// Handle drop
+dropArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropArea.classList.remove('highlight');
+    addFiles(e.dataTransfer.files);
+});
+
+// Handle file selection
+fileInput.addEventListener('change', () => {
+    addFiles(fileInput.files);
+});
+
+function addFiles(files) {
+    for (let i = 0; i < files.length; i++) {
+        currentFiles.push(files[i]);
+    }
+    renderFileList();
+}
+
+function renderFileList() {
+    fileList.innerHTML = "";
+    currentFiles.forEach((file, index) => {
+        const li = document.createElement('li');
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'filename';
+        nameSpan.textContent = file.name;
+
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = "X";
+        removeBtn.onclick = () => {
+            currentFiles.splice(index, 1);
+            renderFileList();
+        };
+
+        li.appendChild(nameSpan);
+        li.appendChild(removeBtn);
+        fileList.appendChild(li);
+    });
+}
+
+// Upload on double-click
+dropArea.addEventListener('dblclick', uploadFiles);
+
+function uploadFiles() {
+    if (currentFiles.length === 0) {
+        statusText.innerText = "No files selected.";
+        return;
+    }
+
+    progressBar.style.width = "0%";
+    statusText.innerText = "Uploading...";
+
+    const xhr = new XMLHttpRequest();
+    const formData = new FormData();
+
+    currentFiles.forEach(file => {
+        formData.append("files", file);
+    });
+
+    xhr.open("POST", "/upload", true);
+    xhr.responseType = "blob";
+
+    xhr.upload.onprogress = function(e) {
+        if (e.lengthComputable) {
+            const percent = (e.loaded / e.total) * 100;
+            progressBar.style.width = percent + "%";
+        }
+    };
+
+    xhr.onload = function() {
+        if (xhr.status === 200) {
+            const blob = new Blob([xhr.response]);
+            const link = document.createElement('a');
+            link.href = window.URL.createObjectURL(blob);
+            link.download = "converted_files.zip";
+            link.click();
+            progressBar.style.width = "100%";
+            statusText.innerText = "✅ ZIP Download ready!";
+            currentFiles = [];
+            renderFileList();
+        } else {
+            statusText.innerText = "❌ Upload failed.";
+        }
+    };
+
+    xhr.onerror = function() {
+        statusText.innerText = "❌ Upload failed.";
+    };
+
+    xhr.send(formData);
+}
+</script>
 
 </body>
 </html>
