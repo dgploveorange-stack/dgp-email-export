@@ -6,11 +6,13 @@ import uuid
 import zipfile
 from PyPDF2 import PdfMerger
 from weasyprint import HTML
+import shutil
 
 app = Flask(__name__)
 
 BASE_FOLDER = "workspace"
 os.makedirs(BASE_FOLDER, exist_ok=True)
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB max
 
 
 def process_msg_file(msg_path, work_dir):
@@ -67,7 +69,6 @@ def process_msg_file(msg_path, work_dir):
     msg.close()
 
     temp_files.append(final_path)
-
     return final_path, temp_files
 
 
@@ -78,11 +79,9 @@ def index():
 
 @app.route("/upload", methods=["POST"])
 def upload():
-
-    if "files" not in request.files:
-        return jsonify({"error": "No files uploaded"}), 400
-
     files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "No files uploaded"}), 400
 
     session_id = str(uuid.uuid4())
     work_dir = os.path.join(BASE_FOLDER, session_id)
@@ -93,10 +92,8 @@ def upload():
 
     try:
         for file in files:
-
             if not file.filename.lower().endswith(".msg"):
                 continue
-
             msg_path = os.path.join(work_dir, f"{uuid.uuid4()}.msg")
             file.save(msg_path)
             all_temp_files.append(msg_path)
@@ -109,7 +106,6 @@ def upload():
             return jsonify({"error": "No valid MSG files processed"}), 400
 
         zip_path = os.path.join(work_dir, "converted_files.zip")
-
         with zipfile.ZipFile(zip_path, 'w') as zipf:
             for pdf in created_files:
                 zipf.write(pdf, os.path.basename(pdf))
@@ -118,12 +114,8 @@ def upload():
 
         @response.call_on_close
         def cleanup():
-            for f in all_temp_files:
-                if os.path.exists(f):
-                    os.remove(f)
-            if os.path.exists(zip_path):
-                os.remove(zip_path)
-            os.rmdir(work_dir)
+            if os.path.exists(work_dir):
+                shutil.rmtree(work_dir)
 
         return response
 
