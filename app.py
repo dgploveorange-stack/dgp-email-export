@@ -33,15 +33,20 @@ def process_msg_file(msg_path, work_dir):
     subject = msg.subject or ""
     print(subject)
 
-    # Detect all From: headers
+    # Match all From: headers
     from_pattern = re.compile(r'^\s*From:\s.*', re.IGNORECASE | re.MULTILINE)
     matches = list(from_pattern.finditer(body))
-    if len(matches) < 1:
-        raise Exception("No emails found in thread")
 
-    # Extract the last two emails, pick the most recent second email
-    second_start = matches[-2].start() if len(matches) >= 2 else matches[0].start()
-    second_end = matches[-1].start() if len(matches) >= 2 else len(body)
+    if not matches:
+        raise Exception("No From: headers found")
+
+    # Pick the **first From:** as the start of the latest email
+    # (Outlook puts newest email on top)
+    second_start = matches[0].start()
+    
+    # End at the next From: (if exists) or end of body
+    second_end = matches[1].start() if len(matches) > 1 else len(body)
+
     second_email = body[second_start:second_end].strip()
 
     # HTML for PDF
@@ -157,6 +162,7 @@ def upload():
 if __name__ == "__main__":
     # Run locally for testing
     app.run(host="0.0.0.0", port=10000, debug=True)
+
 
 
 
