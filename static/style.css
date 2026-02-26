@@ -93,3 +93,18 @@ body {
 #file-list li button:hover {
     background: #d93636;
 }
+
+#uploadBtn {
+    margin-top: 15px;
+    padding: 10px 20px;
+    font-size: 14px;
+    background: #007bff;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+#uploadBtn:hover {
+    background: #0056b3;
+}
