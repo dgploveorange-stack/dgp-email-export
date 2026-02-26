@@ -6,31 +6,42 @@ import uuid
 import zipfile
 from PyPDF2 import PdfMerger
 from weasyprint import HTML
-import shutil
 
 app = Flask(__name__)
 
+# Base folder for temp files
 BASE_FOLDER = "workspace"
 os.makedirs(BASE_FOLDER, exist_ok=True)
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB max
 
 
 def process_msg_file(msg_path, work_dir):
+    """
+    Convert a single .msg file to PDF, including the second email only, merge PDF attachments,
+    and return the final PDF path and all temp files for cleanup.
+    """
     temp_files = []
+
     msg = extract_msg.Message(msg_path)
     body = msg.body or ""
 
     if isinstance(body, bytes):
         body = body.decode("utf-8", errors="replace")
 
+    # Find all 'From:' headers
     from_pattern = re.compile(r'^From:\s.*', re.IGNORECASE | re.MULTILINE)
     matches = list(from_pattern.finditer(body))
 
     if len(matches) < 2:
-        raise Exception("Second email not found")
+        raise Exception("Second email not found in this MSG file.")
 
+    # Extract second email
     second_text = body[matches[0].start():matches[1].start()].strip()
 
+    # Optional: remove Subject line from search
+    lines = second_text.splitlines()
+    second_text_body_only = "\n".join([l for l in lines if not l.lower().startswith("subject:")])
+
+    # Convert second email text to HTML
     html_content = f"""
     <html>
     <body style="font-family:Arial; font-size:12px;">
@@ -39,10 +50,12 @@ def process_msg_file(msg_path, work_dir):
     </html>
     """
 
+    # Save email PDF
     email_pdf = os.path.join(work_dir, f"{uuid.uuid4()}_email.pdf")
     HTML(string=html_content).write_pdf(email_pdf)
     temp_files.append(email_pdf)
 
+    # Merge PDF attachments
     merger = PdfMerger()
     merger.append(email_pdf)
 
@@ -55,9 +68,8 @@ def process_msg_file(msg_path, work_dir):
             merger.append(attach_path)
             temp_files.append(attach_path)
 
-    pattern = re.compile(r'DO\d{2}-\d{5}')
-    match = pattern.search(body)
-
+    # Extract document number from second email only
+    match = re.search(r'DO\d{2}-\d{5}', second_text_body_only)
     if match:
         output_name = f"{match.group(0)}.pdf"
     else:
@@ -79,6 +91,9 @@ def index():
 
 @app.route("/upload", methods=["POST"])
 def upload():
+    if "files" not in request.files:
+        return jsonify({"error": "No files uploaded"}), 400
+
     files = request.files.getlist("files")
     if not files:
         return jsonify({"error": "No files uploaded"}), 400
@@ -94,6 +109,7 @@ def upload():
         for file in files:
             if not file.filename.lower().endswith(".msg"):
                 continue
+
             msg_path = os.path.join(work_dir, f"{uuid.uuid4()}.msg")
             file.save(msg_path)
             all_temp_files.append(msg_path)
@@ -105,17 +121,25 @@ def upload():
         if not created_files:
             return jsonify({"error": "No valid MSG files processed"}), 400
 
+        # Create ZIP
         zip_path = os.path.join(work_dir, "converted_files.zip")
         with zipfile.ZipFile(zip_path, 'w') as zipf:
             for pdf in created_files:
                 zipf.write(pdf, os.path.basename(pdf))
 
+        # Send ZIP to client
         response = send_file(zip_path, as_attachment=True)
 
+        # Cleanup temp files after download
         @response.call_on_close
         def cleanup():
+            for f in all_temp_files:
+                if os.path.exists(f):
+                    os.remove(f)
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
             if os.path.exists(work_dir):
-                shutil.rmtree(work_dir)
+                os.rmdir(work_dir)
 
         return response
 
@@ -124,4 +148,5 @@ def upload():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    # For local testing
+    app.run(host="0.0.0.0", port=10000, debug=True)
