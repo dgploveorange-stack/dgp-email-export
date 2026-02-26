@@ -28,10 +28,10 @@ def process_msg_file(msg_path, work_dir):
         body = body.decode("utf-8", errors="replace")
 
     # Find all 'From:' headers
-    from_pattern = re.compile(r'^From:\s.*', re.IGNORECASE | re.MULTILINE)
+    from_pattern = re.compile(r'^\s*From:\s.*', re.IGNORECASE | re.MULTILINE)
     matches = list(from_pattern.finditer(body))
 
-    if len(matches) < 2:
+    if len(matches) < 1:
         raise Exception("Second email not found in this MSG file.")
 
     # Extract second email
@@ -150,3 +150,4 @@ def upload():
 if __name__ == "__main__":
     # For local testing
     app.run(host="0.0.0.0", port=10000, debug=True)
+
