@@ -1,35 +1,109 @@
+/* -------------------------------
+   General Body & Container
+---------------------------------*/
 body {
-    font-family: Arial;
+    font-family: Arial, sans-serif;
     background: #f4f6f9;
     text-align: center;
+    margin: 0;
+    padding: 0;
 }
 
 .container {
-    margin-top: 100px;
+    margin: 80px auto;
+    width: 360px;
 }
 
+/* -------------------------------
+   Drop Area
+---------------------------------*/
 #drop-area {
     border: 2px dashed #007bff;
+    border-radius: 10px;
     padding: 40px;
-    width: 300px;
-    margin: auto;
+    background: #fff;
     cursor: pointer;
-    background: white;
+    transition: background 0.3s, border-color 0.3s;
 }
 
 #drop-area.highlight {
     background-color: #e9f5ff;
+    border-color: #0056b3;
 }
 
-#progress-container {
-    width: 300px;
+#drop-area p {
+    margin: 0;
+    font-weight: bold;
+    color: #007bff;
+}
+
+/* -------------------------------
+   Progress Bars
+---------------------------------*/
+.progress-container {
+    width: 100%;
+    margin: 20px 0;
+}
+
+.progress-bar {
     height: 10px;
-    background: #ddd;
-    margin: 20px auto;
-}
-
-#progress-bar {
-    height: 100%;
     width: 0%;
     background: #007bff;
+    border-radius: 5px;
+    transition: width 0.3s ease;
+}
+
+/* -------------------------------
+   Status Text
+---------------------------------*/
+#status {
+    font-weight: bold;
+    margin-top: 10px;
+    color: #333;
+}
+
+/* -------------------------------
+   File List
+---------------------------------*/
+#file-list {
+    list-style: none;
+    padding: 0;
+    margin-top: 15px;
+    text-align: left;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+#file-list li {
+    background: #e9f5ff;
+    margin-bottom: 6px;
+    padding: 6px 10px;
+    border-radius: 5px;
+    font-size: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* File name styling */
+#file-list li span.filename {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Remove button styling */
+#file-list li button {
+    background: #ff4d4d;
+    border: none;
+    border-radius: 5px;
+    padding: 2px 6px;
+    color: white;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+#file-list li button:hover {
+    background: #d93636;
 }
