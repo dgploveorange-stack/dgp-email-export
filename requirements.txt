@@ -1,0 +1,5 @@
+flask
+extract-msg
+PyPDF2
+weasyprint
+gunicorn

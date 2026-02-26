@@ -1,0 +1,35 @@
+body {
+    font-family: Arial;
+    background: #f4f6f9;
+    text-align: center;
+}
+
+.container {
+    margin-top: 100px;
+}
+
+#drop-area {
+    border: 2px dashed #007bff;
+    padding: 40px;
+    width: 300px;
+    margin: auto;
+    cursor: pointer;
+    background: white;
+}
+
+#drop-area.highlight {
+    background-color: #e9f5ff;
+}
+
+#progress-container {
+    width: 300px;
+    height: 10px;
+    background: #ddd;
+    margin: 20px auto;
+}
+
+#progress-bar {
+    height: 100%;
+    width: 0%;
+    background: #007bff;
+}
