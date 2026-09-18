@@ -6,124 +6,243 @@ import uuid
 import zipfile
 import html
 import shutil
+import traceback
+
 from PyPDF2 import PdfMerger
 from weasyprint import HTML
+from striprtf.striprtf import rtf_to_text
+
 
 app = Flask(__name__)
 
 # ============================================================
-# CONFIGURATION
+# CONFIG
 # ============================================================
 
 BASE_FOLDER = "workspace"
+
 os.makedirs(BASE_FOLDER, exist_ok=True)
 
 
 # ============================================================
-# HELPER FUNCTIONS
+# GENERAL HELPERS
 # ============================================================
 
-def decode_content(content):
+def decode_content(value):
     """
-    Convert MSG content into a normal Python string.
+    Safely convert MSG content to string.
     """
-    if content is None:
+
+    if value is None:
         return ""
 
-    if isinstance(content, bytes):
-        # Try UTF-8 first
+    if isinstance(value, str):
+        return value
+
+    if isinstance(value, bytes):
+
+        # Try UTF-8
         try:
-            return content.decode("utf-8")
-        except UnicodeDecodeError:
+            return value.decode("utf-8")
+        except Exception:
             pass
 
-        # Fallback encodings commonly encountered in email
-        for encoding in ["cp1252", "latin-1"]:
-            try:
-                return content.decode(encoding)
-            except UnicodeDecodeError:
-                continue
+        # Try Windows encoding
+        try:
+            return value.decode("cp1252")
+        except Exception:
+            pass
 
-        return content.decode("utf-8", errors="replace")
+        # Last resort
+        return value.decode(
+            "latin-1",
+            errors="replace"
+        )
 
-    return str(content)
+    return str(value)
 
 
-def get_msg_html(msg):
+def clean_text(text):
     """
-    Get the HTML version of the MSG body if available.
-    Returns empty string if no usable HTML body exists.
+    Normalize strange whitespace and null characters.
     """
 
-    html_body = getattr(msg, "htmlBody", None)
-
-    if not html_body:
+    if not text:
         return ""
 
-    html_body = decode_content(html_body).strip()
+    text = text.replace("\x00", "")
 
-    if not html_body:
+    text = text.replace("\r\n", "\n")
+    text = text.replace("\r", "\n")
+
+    # Remove excessive blank lines
+    text = re.sub(
+        r"\n{4,}",
+        "\n\n\n",
+        text
+    )
+
+    return text.strip()
+
+
+# ============================================================
+# BODY EXTRACTION
+# ============================================================
+
+def get_plain_body(msg):
+    """
+    Get normal plain-text body.
+    """
+
+    try:
+        body = getattr(msg, "body", None)
+
+        body = decode_content(body)
+
+        return clean_text(body)
+
+    except Exception as e:
+
+        print(
+            "Plain body extraction failed:",
+            e
+        )
+
         return ""
 
-    # Some MSG files can contain a complete HTML document,
-    # while others contain only the body fragment.
-    return html_body
 
-
-def get_msg_plain_text(msg):
+def get_html_body(msg):
     """
-    Get the plain-text version of the MSG body.
+    Get HTML body.
     """
 
-    body = getattr(msg, "body", None)
+    try:
 
-    if not body:
+        body = getattr(
+            msg,
+            "htmlBody",
+            None
+        )
+
+        body = decode_content(body)
+
+        return body.strip()
+
+    except Exception as e:
+
+        print(
+            "HTML body extraction failed:",
+            e
+        )
+
         return ""
 
-    return decode_content(body).strip()
 
-
-def remove_quoted_email_plain_text(body):
+def get_rtf_body(msg):
     """
-    Remove previous/quoted emails from a plain-text Outlook email.
+    Get RTF body and convert it to plain text.
 
-    Outlook commonly uses:
-        -----Original Message-----
+    Some Outlook MSG files contain useful content
+    only in RTF.
+    """
 
-    We also support common From:/Sent:/To:/Subject: blocks.
+    try:
+
+        rtf = getattr(
+            msg,
+            "rtfBody",
+            None
+        )
+
+        if not rtf:
+            return ""
+
+        rtf = decode_content(rtf)
+
+        if not rtf:
+            return ""
+
+        print(
+            "RTF body found, length:",
+            len(rtf)
+        )
+
+        try:
+
+            text = rtf_to_text(rtf)
+
+            return clean_text(text)
+
+        except Exception as e:
+
+            print(
+                "RTF conversion failed:",
+                e
+            )
+
+            return ""
+
+    except Exception as e:
+
+        print(
+            "RTF body extraction failed:",
+            e
+        )
+
+        return ""
+
+
+# ============================================================
+# QUOTED EMAIL REMOVAL
+# ============================================================
+
+def remove_quoted_plain_text(body):
+    """
+    Remove previous/quoted email from plain text.
+
+    This is deliberately conservative.
     """
 
     if not body:
         return ""
 
     # --------------------------------------------------------
-    # Method 1: Outlook separator
+    # Outlook Original Message
     # --------------------------------------------------------
 
-    separators = [
-        r"^-{3,}\s*Original Message\s*-{3,}\s*$",
-        r"^-{3,}\s*Original Appointment\s*-{3,}\s*$",
+    patterns = [
+
+        r"^-{3,}\s*Original Message\s*-{3,}",
+
+        r"^-{3,}\s*Original Appointment\s*-{3,}",
+
+        r"^-{3,}\s*Forwarded message\s*-{3,}",
+
     ]
 
-    for pattern in separators:
+    for pattern in patterns:
+
         match = re.search(
             pattern,
             body,
-            flags=re.IGNORECASE | re.MULTILINE
+            flags=re.IGNORECASE |
+                  re.MULTILINE
         )
 
         if match:
-            current_email = body[:match.start()].strip()
 
-            if current_email:
-                return current_email
+            before = body[
+                :match.start()
+            ].strip()
+
+            if len(before) > 10:
+                return before
 
     # --------------------------------------------------------
-    # Method 2: Detect quoted From: block
+    # Detect quoted From/Sent/To/Subject
     # --------------------------------------------------------
 
-    # Look for a conventional quoted header block.
-    quoted_header_pattern = re.compile(
+    quoted_header = re.compile(
         r"""
         ^\s*From:\s*.+$
         \s*
@@ -140,61 +259,100 @@ def remove_quoted_email_plain_text(body):
         re.VERBOSE
     )
 
-    match = quoted_header_pattern.search(body)
+    match = quoted_header.search(body)
 
     if match:
-        # Only remove it if there is meaningful content before it.
-        before = body[:match.start()].strip()
 
-        if before:
+        before = body[
+            :match.start()
+        ].strip()
+
+        if len(before) > 10:
             return before
 
-    # --------------------------------------------------------
-    # Method 3: Fallback to From: headers
-    # --------------------------------------------------------
-
-    from_pattern = re.compile(
-        r"^\s*From:\s*.+$",
-        re.IGNORECASE | re.MULTILINE
-    )
-
-    matches = list(from_pattern.finditer(body))
-
-    if len(matches) >= 2:
-        # Assume the second From: starts the quoted email.
-        before_second_from = body[:matches[1].start()].strip()
-
-        if before_second_from:
-            return before_second_from
-
-    # No quoted content detected.
     return body.strip()
 
 
-def remove_quoted_email_html(html_body):
+def html_to_text(html_body):
     """
-    Remove previous/quoted content from HTML email.
-
-    This is intentionally conservative. If a recognizable
-    Outlook quoted-email section is found, remove everything
-    from that point onward.
+    Basic HTML -> text conversion.
+    Used only for searching and fallback.
     """
 
     if not html_body:
         return ""
 
-    body = html_body
+    text = html_body
+
+    # Remove scripts/styles
+    text = re.sub(
+        r"<script.*?</script>",
+        "",
+        text,
+        flags=re.IGNORECASE |
+              re.DOTALL
+    )
+
+    text = re.sub(
+        r"<style.*?</style>",
+        "",
+        text,
+        flags=re.IGNORECASE |
+              re.DOTALL
+    )
+
+    # Convert common breaks
+    text = re.sub(
+        r"<br\s*/?>",
+        "\n",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    text = re.sub(
+        r"</p\s*>",
+        "\n",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    # Remove remaining tags
+    text = re.sub(
+        r"<[^>]+>",
+        " ",
+        text
+    )
+
+    # Decode HTML entities
+    text = html.unescape(text)
+
+    return clean_text(text)
+
+
+def remove_quoted_html(body):
+    """
+    Remove common Outlook quoted HTML sections.
+    """
+
+    if not body:
+        return ""
 
     # --------------------------------------------------------
-    # Common Outlook HTML separator
+    # Original Message
     # --------------------------------------------------------
 
-    separator_patterns = [
+    patterns = [
+
         r"-{3,}\s*Original Message\s*-{3,}",
+
         r"-{3,}\s*Original Appointment\s*-{3,}",
+
+        r"-{3,}\s*Forwarded message\s*-{3,}",
+
     ]
 
-    for pattern in separator_patterns:
+    for pattern in patterns:
+
         match = re.search(
             pattern,
             body,
@@ -202,22 +360,30 @@ def remove_quoted_email_html(html_body):
         )
 
         if match:
-            before = body[:match.start()].strip()
 
-            if before:
+            before = body[
+                :match.start()
+            ].strip()
+
+            if len(before) > 10:
                 return before
 
     # --------------------------------------------------------
-    # Outlook quoted-message containers
+    # Gmail-style quote
     # --------------------------------------------------------
 
-    quoted_patterns = [
-        r'<div[^>]*class=["\'][^"\']*gmail_quote[^"\']*["\'][^>]*>',
+    quote_patterns = [
+
         r'<blockquote[^>]*>',
-        r'<div[^>]*class=["\'][^"\']*OutlookMessageHeader[^"\']*["\'][^>]*>',
+
+        r'<div[^>]*class=["\'][^"\']*gmail_quote',
+
+        r'<div[^>]*class=["\'][^"\']*OutlookMessageHeader',
+
     ]
 
-    for pattern in quoted_patterns:
+    for pattern in quote_patterns:
+
         match = re.search(
             pattern,
             body,
@@ -225,206 +391,384 @@ def remove_quoted_email_html(html_body):
         )
 
         if match:
-            before = body[:match.start()].strip()
 
-            if before:
+            before = body[
+                :match.start()
+            ].strip()
+
+            if len(before) > 10:
                 return before
 
     return body.strip()
 
 
-def build_pdf_html(content, is_html=False):
+# ============================================================
+# SELECT BEST BODY
+# ============================================================
+
+def extract_email_content(msg):
     """
-    Convert email content into HTML suitable for WeasyPrint.
+    Extract the best available body.
+
+    Priority:
+
+        1. HTML
+        2. Plain text
+        3. RTF
+
+    Returns:
+
+        content
+        is_html
+        source
+    """
+
+    # --------------------------------------------------------
+    # HTML
+    # --------------------------------------------------------
+
+    html_body = get_html_body(msg)
+
+    if html_body:
+
+        cleaned = remove_quoted_html(
+            html_body
+        )
+
+        if cleaned:
+
+            print(
+                "Using HTML body"
+            )
+
+            return (
+                cleaned,
+                True,
+                "HTML"
+            )
+
+    # --------------------------------------------------------
+    # Plain text
+    # --------------------------------------------------------
+
+    plain_body = get_plain_body(msg)
+
+    if plain_body:
+
+        cleaned = remove_quoted_plain_text(
+            plain_body
+        )
+
+        if cleaned:
+
+            print(
+                "Using plain-text body"
+            )
+
+            return (
+                cleaned,
+                False,
+                "PLAIN"
+            )
+
+    # --------------------------------------------------------
+    # RTF
+    # --------------------------------------------------------
+
+    rtf_body = get_rtf_body(msg)
+
+    if rtf_body:
+
+        cleaned = remove_quoted_plain_text(
+            rtf_body
+        )
+
+        if cleaned:
+
+            print(
+                "Using RTF body"
+            )
+
+            return (
+                cleaned,
+                False,
+                "RTF"
+            )
+
+    # --------------------------------------------------------
+    # Nothing found
+    # --------------------------------------------------------
+
+    return (
+        "",
+        False,
+        "NONE"
+    )
+
+
+# ============================================================
+# PDF HTML
+# ============================================================
+
+def create_pdf_html(
+    content,
+    is_html=False
+):
+    """
+    Create HTML document for WeasyPrint.
     """
 
     if is_html:
+
         email_content = content
+
     else:
-        # Escape plain text so email characters such as
-        # <, > and & don't break the generated HTML.
-        email_content = html.escape(content)
+
+        escaped = html.escape(
+            content
+        )
 
         email_content = f"""
-        <pre style="
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            font-family: Arial, sans-serif;
-            font-size: 12px;
-            line-height: 1.4;
-        ">{email_content}</pre>
+        <pre class="plain-email">{escaped}</pre>
         """
 
     return f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
+<!DOCTYPE html>
 
-        <style>
-            @page {{
-                size: A4;
-                margin: 18mm;
-            }}
+<html>
 
-            body {{
-                font-family: Arial, sans-serif;
-                font-size: 12px;
-                line-height: 1.4;
-                color: #000;
-                word-wrap: break-word;
-            }}
+<head>
 
-            img {{
-                max-width: 100%;
-                height: auto;
-            }}
+<meta charset="UTF-8">
 
-            table {{
-                max-width: 100%;
-                border-collapse: collapse;
-            }}
+<style>
 
-            td, th {{
-                vertical-align: top;
-            }}
+@page {{
+    size: A4;
+    margin: 18mm;
+}}
 
-            pre {{
-                white-space: pre-wrap;
-                word-wrap: break-word;
-                font-family: Arial, sans-serif;
-            }}
-        </style>
-    </head>
+body {{
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11pt;
+    line-height: 1.45;
+    color: #111;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}}
 
-    <body>
-        {email_content}
-    </body>
-    </html>
-    """
+.plain-email {{
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11pt;
+}}
 
+img {{
+    max-width: 100%;
+    height: auto;
+}}
 
-def get_email_content(msg):
-    """
-    Get the best available email body.
+table {{
+    max-width: 100%;
+    border-collapse: collapse;
+}}
 
-    Priority:
-        1. HTML
-        2. Plain text
+td, th {{
+    vertical-align: top;
+}}
 
-    Returns:
-        (content, is_html)
-    """
+</style>
 
-    # --------------------------------------------------------
-    # Try HTML first
-    # --------------------------------------------------------
+</head>
 
-    html_body = get_msg_html(msg)
+<body>
 
-    if html_body:
-        cleaned_html = remove_quoted_email_html(html_body)
+{email_content}
 
-        if cleaned_html:
-            return cleaned_html, True
+</body>
 
-    # --------------------------------------------------------
-    # Fallback to plain text
-    # --------------------------------------------------------
-
-    plain_body = get_msg_plain_text(msg)
-
-    if plain_body:
-        cleaned_text = remove_quoted_email_plain_text(plain_body)
-
-        if cleaned_text:
-            return cleaned_text, False
-
-    return "", False
-
-
-def find_output_name(subject, body):
-    """
-    Find DOxx-xxxxx anywhere in subject/body.
-
-    Example:
-        DO12-12345
-        (DO12-12345)
-        Re: DO12-12345
-    """
-
-    pattern = r"\bDO\d{2}-\d{5}\b"
-
-    # Body first
-    match = re.search(pattern, body or "", re.IGNORECASE)
-
-    if match:
-        return f"{match.group(0).upper()}.pdf"
-
-    # Subject second
-    match = re.search(pattern, subject or "", re.IGNORECASE)
-
-    if match:
-        return f"{match.group(0).upper()}.pdf"
-
-    # Fallback
-    return f"output_{uuid.uuid4().hex[:6]}.pdf"
+</html>
+"""
 
 
 # ============================================================
-# PROCESS MSG
+# OUTPUT FILE NAME
 # ============================================================
 
-def process_msg_file(msg_path, work_dir):
+def determine_output_name(
+    subject,
+    plain_body,
+    html_body,
+    rtf_body
+):
     """
-    Process a single MSG file:
+    Find DOxx-xxxxx from any available MSG content.
+    """
 
-    1. Read MSG
-    2. Extract latest/current email body
-    3. Prefer HTML body
-    4. Convert email to PDF
-    5. Add PDF attachments
-    6. Name final PDF using DOxx-xxxxx
-    """
+    pattern = re.compile(
+        r"\bDO\d{2}-\d{5}\b",
+        re.IGNORECASE
+    )
+
+    # Search body first
+    bodies = [
+        plain_body,
+        html_to_text(html_body),
+        rtf_body,
+        subject
+    ]
+
+    for body in bodies:
+
+        if not body:
+            continue
+
+        match = pattern.search(
+            body
+        )
+
+        if match:
+
+            number = match.group(
+                0
+            ).upper()
+
+            return f"{number}.pdf"
+
+    return (
+        f"output_"
+        f"{uuid.uuid4().hex[:6]}"
+        f".pdf"
+    )
+
+
+# ============================================================
+# PROCESS ONE MSG
+# ============================================================
+
+def process_msg_file(
+    msg_path,
+    work_dir
+):
 
     temp_files = []
 
     msg = None
 
     try:
+
+        print("\n")
+        print("=" * 80)
+        print(
+            "PROCESSING MSG:",
+            msg_path
+        )
+        print("=" * 80)
+
         # ----------------------------------------------------
         # Open MSG
         # ----------------------------------------------------
 
-        msg = extract_msg.Message(msg_path)
-
-        subject = decode_content(
-            getattr(msg, "subject", "") or ""
+        msg = extract_msg.Message(
+            msg_path
         )
 
-        print("=" * 80)
-        print("Processing:", msg_path)
-        print("Subject:", subject)
-
         # ----------------------------------------------------
-        # Extract email content
+        # Subject
         # ----------------------------------------------------
 
-        content, is_html = get_email_content(msg)
+        subject = decode_content(
+            getattr(
+                msg,
+                "subject",
+                ""
+            )
+        )
+
+        print(
+            "Subject:",
+            repr(subject)
+        )
+
+        # ----------------------------------------------------
+        # Get ALL body versions
+        # ----------------------------------------------------
+
+        plain_body = get_plain_body(
+            msg
+        )
+
+        html_body = get_html_body(
+            msg
+        )
+
+        rtf_body = get_rtf_body(
+            msg
+        )
+
+        print(
+            "Plain body length:",
+            len(plain_body)
+        )
+
+        print(
+            "HTML body length:",
+            len(html_body)
+        )
+
+        print(
+            "RTF body length:",
+            len(rtf_body)
+        )
+
+        # ----------------------------------------------------
+        # Select best body
+        # ----------------------------------------------------
+
+        content, is_html, source = (
+            extract_email_content(msg)
+        )
+
+        print(
+            "Selected source:",
+            source
+        )
+
+        print(
+            "Selected content length:",
+            len(content)
+        )
 
         if not content:
+
             raise Exception(
-                "Unable to extract readable email body from MSG file"
+                "No readable body found. "
+                "MSG may contain unsupported/corrupt content."
             )
 
-        print("Body format:", "HTML" if is_html else "Plain Text")
-        print("Extracted body length:", len(content))
+        # ----------------------------------------------------
+        # Determine output filename
+        # ----------------------------------------------------
+
+        output_name = determine_output_name(
+            subject,
+            plain_body,
+            html_body,
+            rtf_body
+        )
+
+        print(
+            "Output filename:",
+            output_name
+        )
 
         # ----------------------------------------------------
         # Generate email PDF
         # ----------------------------------------------------
 
-        html_content = build_pdf_html(
+        pdf_html = create_pdf_html(
             content,
             is_html=is_html
         )
@@ -435,137 +779,179 @@ def process_msg_file(msg_path, work_dir):
         )
 
         HTML(
-            string=html_content,
-            base_url=os.path.dirname(os.path.abspath(msg_path))
-        ).write_pdf(email_pdf)
+            string=pdf_html,
+            base_url=os.path.abspath(
+                work_dir
+            )
+        ).write_pdf(
+            email_pdf
+        )
 
-        temp_files.append(email_pdf)
+        temp_files.append(
+            email_pdf
+        )
+
+        print(
+            "Email PDF created"
+        )
 
         # ----------------------------------------------------
-        # Create PDF merger
+        # Merge attachments
         # ----------------------------------------------------
 
         merger = PdfMerger()
 
         try:
-            merger.append(email_pdf)
 
-            # ------------------------------------------------
-            # Process PDF attachments
-            # ------------------------------------------------
+            merger.append(
+                email_pdf
+            )
 
-            attachments = getattr(msg, "attachments", []) or []
+            attachments = (
+                getattr(
+                    msg,
+                    "attachments",
+                    []
+                )
+                or []
+            )
+
+            print(
+                "Attachments:",
+                len(attachments)
+            )
 
             for attachment in attachments:
 
-                name = (
-                    getattr(attachment, "longFilename", None)
-                    or getattr(attachment, "shortFilename", None)
-                )
+                try:
 
-                if not name:
-                    continue
+                    name = (
+                        getattr(
+                            attachment,
+                            "longFilename",
+                            None
+                        )
+                        or
+                        getattr(
+                            attachment,
+                            "shortFilename",
+                            None
+                        )
+                    )
 
-                name = os.path.basename(str(name))
+                    if not name:
+                        continue
 
-                if not name.lower().endswith(".pdf"):
-                    continue
+                    name = os.path.basename(
+                        str(name)
+                    )
 
-                attachment_data = getattr(
-                    attachment,
-                    "data",
-                    None
-                )
+                    # Only PDF attachments
+                    if not name.lower().endswith(
+                        ".pdf"
+                    ):
+                        continue
 
-                if not attachment_data:
+                    data = getattr(
+                        attachment,
+                        "data",
+                        None
+                    )
+
+                    if not data:
+                        print(
+                            "Empty attachment:",
+                            name
+                        )
+                        continue
+
+                    attachment_path = os.path.join(
+                        work_dir,
+                        f"{uuid.uuid4()}_{name}"
+                    )
+
+                    with open(
+                        attachment_path,
+                        "wb"
+                    ) as f:
+
+                        f.write(data)
+
                     print(
-                        "Skipping empty attachment:",
+                        "Merging attachment:",
                         name
                     )
+
+                    # Try to append
+                    merger.append(
+                        attachment_path
+                    )
+
+                    temp_files.append(
+                        attachment_path
+                    )
+
+                except Exception as attachment_error:
+
+                    # One bad attachment should NOT
+                    # prevent the email from being converted.
+                    print(
+                        "Attachment error:",
+                        attachment_error
+                    )
+
                     continue
 
-                attach_path = os.path.join(
-                    work_dir,
-                    f"{uuid.uuid4()}_{name}"
-                )
-
-                with open(
-                    attach_path,
-                    "wb"
-                ) as f:
-                    f.write(attachment_data)
-
-                print(
-                    "Adding PDF attachment:",
-                    name
-                )
-
-                merger.append(attach_path)
-
-                temp_files.append(attach_path)
-
             # ------------------------------------------------
-            # Determine final filename
+            # Final output
             # ------------------------------------------------
-
-            # For filename searching, use both plain text
-            # and HTML stripped of tags.
-            plain_body = get_msg_plain_text(msg)
-
-            html_for_search = get_msg_html(msg)
-
-            html_text = re.sub(
-                r"<[^>]+>",
-                " ",
-                html_for_search or ""
-            )
-
-            search_body = (
-                plain_body
-                + "\n"
-                + html_text
-            )
-
-            output_name = find_output_name(
-                subject,
-                search_body
-            )
 
             final_path = os.path.join(
                 work_dir,
                 output_name
             )
 
-            # Avoid collision when two MSG files contain
-            # the same DO number.
-            if os.path.exists(final_path):
+            # Avoid duplicate filenames
+            if os.path.exists(
+                final_path
+            ):
 
-                base_name = os.path.splitext(
+                base = os.path.splitext(
                     output_name
                 )[0]
 
                 final_path = os.path.join(
                     work_dir,
-                    f"{base_name}_{uuid.uuid4().hex[:6]}.pdf"
+                    f"{base}_"
+                    f"{uuid.uuid4().hex[:6]}"
+                    f".pdf"
                 )
 
-            # ------------------------------------------------
-            # Write final PDF
-            # ------------------------------------------------
+            merger.write(
+                final_path
+            )
 
-            merger.write(final_path)
+            print(
+                "Final PDF created:",
+                final_path
+            )
 
-            temp_files.append(final_path)
-
-            print("Created:", final_path)
-
-            return final_path, temp_files
+            return (
+                final_path,
+                temp_files
+            )
 
         finally:
-            merger.close()
+
+            try:
+                merger.close()
+            except Exception:
+                pass
 
     finally:
+
         if msg is not None:
+
             try:
                 msg.close()
             except Exception:
@@ -573,34 +959,50 @@ def process_msg_file(msg_path, work_dir):
 
 
 # ============================================================
-# FLASK ROUTES
+# HOME
 # ============================================================
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+
+    return render_template(
+        "index.html"
+    )
 
 
-@app.route("/upload", methods=["POST"])
+# ============================================================
+# UPLOAD
+# ============================================================
+
+@app.route(
+    "/upload",
+    methods=["POST"]
+)
 def upload():
 
     if "files" not in request.files:
+
         return jsonify({
             "error": "No files uploaded"
         }), 400
 
-    files = request.files.getlist("files")
+    files = request.files.getlist(
+        "files"
+    )
 
     if not files:
+
         return jsonify({
             "error": "No files uploaded"
         }), 400
 
     # --------------------------------------------------------
-    # Create unique workspace
+    # Workspace
     # --------------------------------------------------------
 
-    session_id = str(uuid.uuid4())
+    session_id = str(
+        uuid.uuid4()
+    )
 
     work_dir = os.path.join(
         BASE_FOLDER,
@@ -613,23 +1015,31 @@ def upload():
     )
 
     created_files = []
-    all_temp_files = []
+
+    errors = []
 
     try:
 
         # ----------------------------------------------------
-        # Process each uploaded file
+        # Process files
         # ----------------------------------------------------
 
         for file in files:
 
-            filename = file.filename or ""
+            filename = (
+                file.filename
+                or ""
+            )
 
-            if not filename.lower().endswith(".msg"):
-                print(
-                    "Skipping non-MSG file:",
-                    filename
-                )
+            if not filename.lower().endswith(
+                ".msg"
+            ):
+
+                errors.append({
+                    "file": filename,
+                    "error": "Not an MSG file"
+                })
+
                 continue
 
             msg_path = os.path.join(
@@ -637,49 +1047,55 @@ def upload():
                 f"{uuid.uuid4()}.msg"
             )
 
-            file.save(msg_path)
-
-            all_temp_files.append(msg_path)
-
             try:
 
-                final_pdf, temp_files = process_msg_file(
-                    msg_path,
-                    work_dir
+                file.save(
+                    msg_path
+                )
+
+                final_pdf, temp_files = (
+                    process_msg_file(
+                        msg_path,
+                        work_dir
+                    )
                 )
 
                 created_files.append(
                     final_pdf
                 )
 
-                all_temp_files.extend(
-                    temp_files
-                )
-
             except Exception as e:
 
                 print(
-                    f"Error processing {filename}: {e}"
+                    "\nERROR PROCESSING:",
+                    filename
                 )
 
-                # Continue processing other MSG files
-                continue
+                print(
+                    traceback.format_exc()
+                )
+
+                errors.append({
+                    "file": filename,
+                    "error": str(e)
+                })
 
         # ----------------------------------------------------
-        # No successful files
+        # Nothing succeeded
         # ----------------------------------------------------
 
         if not created_files:
 
             return jsonify({
                 "error": (
-                    "No valid MSG files could be processed. "
-                    "Check the server console for details."
-                )
+                    "No MSG files could be "
+                    "successfully converted."
+                ),
+                "details": errors
             }), 400
 
         # ----------------------------------------------------
-        # Create ZIP
+        # ZIP
         # ----------------------------------------------------
 
         zip_path = os.path.join(
@@ -695,15 +1111,19 @@ def upload():
 
             for pdf in created_files:
 
-                if os.path.exists(pdf):
+                if os.path.exists(
+                    pdf
+                ):
 
                     zipf.write(
                         pdf,
-                        os.path.basename(pdf)
+                        os.path.basename(
+                            pdf
+                        )
                     )
 
         # ----------------------------------------------------
-        # Send ZIP
+        # Send response
         # ----------------------------------------------------
 
         response = send_file(
@@ -713,16 +1133,15 @@ def upload():
             mimetype="application/zip"
         )
 
-        # ----------------------------------------------------
-        # Cleanup after response
-        # ----------------------------------------------------
-
         @response.call_on_close
         def cleanup():
 
             try:
 
-                if os.path.exists(work_dir):
+                if os.path.exists(
+                    work_dir
+                ):
+
                     shutil.rmtree(
                         work_dir,
                         ignore_errors=True
@@ -740,17 +1159,20 @@ def upload():
     except Exception as e:
 
         print(
-            "Upload error:",
-            str(e)
+            traceback.format_exc()
         )
 
-        # Cleanup immediately if something failed
         try:
-            if os.path.exists(work_dir):
+
+            if os.path.exists(
+                work_dir
+            ):
+
                 shutil.rmtree(
                     work_dir,
                     ignore_errors=True
                 )
+
         except Exception:
             pass
 
@@ -760,7 +1182,7 @@ def upload():
 
 
 # ============================================================
-# RUN APPLICATION
+# START
 # ============================================================
 
 if __name__ == "__main__":
