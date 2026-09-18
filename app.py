@@ -78,7 +78,7 @@ def process_msg_file(msg_path, work_dir):
     # First try body
     # Look for DOxx-xxxxx anywhere, even if inside parentheses
     match_body = re.search(r'DO\d{2}-\d{5}', body)
-    match_subject = re.search(r'\(?DO\d{2}-\d{5}\)?', subject)  # allow parentheses
+    match_subject = re.search(r'DO\d{2}-\d{5}', subject)  # allow parentheses
     
     # Strip parentheses if present
     if match_body:
